@@ -3,13 +3,10 @@
 Console.WriteLine("Hello World!");
 
 
-var types = AppDomain.CurrentDomain.GetAssemblies()
-    .SelectMany(s => s.GetTypes());
+var handlers = GetHandlerInfos(AppDomain.CurrentDomain.GetAssemblies());
 
-types = GetAllTypesImplementingOpenGenericType(types, typeof(IBusHandler<>));
-
-var typeNames = string.Join(", ", types.Select(x => x.Name));
-Console.WriteLine($"handlers: {typeNames}");
+var handlerString = string.Join(", ", handlers.Select(x => x));
+Console.WriteLine($"handlers: {handlerString}");
 
 public interface IBusHandler<TMessage>
 {
@@ -34,17 +31,31 @@ public class HandlerInfo
 {
     public string Topic { get; set; }
     public string Subscription { get; set; }
+
+    public override string ToString()
+    {
+        return $"Topic: {Topic} => Subscription: {Subscription}";
+    }
 }
 
-private static IEnumerable<Type> GetAllTypesImplementingOpenGenericType(IEnumerable<Type> types, Type openGenericType)
+private static IEnumerable<HandlerInfo> GetHandlerInfos(IEnumerable<System.Reflection.Assembly> assembiles)
+{
+    var types = assembiles.SelectMany(s => s.GetTypes());
+    var typeTuples = GetAllTypesImplementingOpenGenericType(types, typeof(IBusHandler<>));
+    foreach (var type in typeTuples)
+    {
+        yield return new HandlerInfo { Subscription = type.Item1.Name, Topic = type.Item2.Name };
+    }
+}
+
+private static IEnumerable<(Type, Type)> GetAllTypesImplementingOpenGenericType(IEnumerable<Type> types, Type openGenericType)
 {
     return from x in types
             from z in x.GetInterfaces()
             let y = x.BaseType
-            where
-            (y != null && y.IsGenericType &&
-            openGenericType.IsAssignableFrom(y.GetGenericTypeDefinition())) ||
-            (z.IsGenericType &&
-            openGenericType.IsAssignableFrom(z.GetGenericTypeDefinition()))
-            select x;
+            let itWasY = y != null && y.IsGenericType && openGenericType.IsAssignableFrom(y.GetGenericTypeDefinition())
+            let itWasZ = !itWasY && z.IsGenericType && openGenericType.IsAssignableFrom(z.GetGenericTypeDefinition())
+            let chooseType = itWasY ? y : z
+            where itWasY || itWasZ
+            select (x, chooseType.GenericTypeArguments.Single());
 }
